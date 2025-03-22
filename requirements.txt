@@ -1,2 +1,4 @@
 openai
 python_dotenv
+fastapi
+uvicorn
