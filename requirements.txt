@@ -2,3 +2,6 @@ openai
 python_dotenv
 fastapi
 uvicorn
+itsdangerous
+sqladmin
+sqlalchemy
