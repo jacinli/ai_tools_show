@@ -4,6 +4,10 @@ import os
 import json
 from services.openai_tools_call import get_all_functions
 from services.openai_tools_call import get_weather,MyTools,BaseTool
+from langfuse import Langfuse
+import uuid
+from services.langfuse_service import langfuse_service
+
 load_dotenv()
 
 
@@ -145,6 +149,7 @@ class AsyncOpenAIOut:
         else:
             if choice.message.content:
                 yield choice.message.content
+    
     async def gpt_stream(self, user_message: str,model: str = os.getenv("OPENAI_MODEL"),history: list[dict] = [],system_prompt: str = "") :
         messages = []
         if history:
@@ -163,7 +168,43 @@ class AsyncOpenAIOut:
         async for chunk in response:
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
+                
+    async def gpt_stream_with_langfuse(self, user_message: str, model: str = None, history: list[dict] = [], system_prompt: str = ""):
+        trace = langfuse_service.langfuse.trace(name="gpt_stream", user_id="user-123")
+        span = trace.span(name="gpt_stream_call")
 
+        try:
+            messages = []
+            if history:
+                messages.extend(history)
+
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+
+            messages.append({"role": "user", "content": user_message})
+
+            # 🔍 添加 input
+            span.update(input={"messages": messages})
+
+            response = await self.oai_client.chat.completions.create(
+                model=model or self.model,
+                messages=messages,
+                stream=True
+            )
+
+            full_response = ""
+            async for chunk in response:
+                if chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+                    yield chunk.choices[0].delta.content
+
+            # 🔍 添加输出
+            span.end(output=full_response)
+            trace.update(output=full_response)
+        except Exception as e:
+            span.end(output={"error": str(e)})
+            trace.update(output={"error": str(e)})
+            raise
     
 async_openai_out = AsyncOpenAIOut()
 
@@ -172,7 +213,7 @@ async_openai_out = AsyncOpenAIOut()
     
 if __name__ == "__main__":
     async def test_gpt_stream():
-        async for chunk in async_openai_out.gpt_stream_with_tools_for_base_tool(user_message="北京的时间多少？",system_prompt="You are a helpful assistant."):
+        async for chunk in async_openai_out.gpt_stream(user_message="北京天气？",system_prompt="You are a helpful assistant."):
             # print(chunk)
             await asyncio.to_thread(print, chunk)  # 在后台线程执行 print
 
